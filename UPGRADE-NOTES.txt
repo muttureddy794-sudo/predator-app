@@ -1,0 +1,17 @@
+SignSpeak AI Upgrade
+===================
+
+- Original application logic retained.
+- Responsive mobile/tablet layout and existing PWA features retained.
+- Removed the built-in/default training password (1234).
+- First use of the training area now prompts the owner to create a password (minimum 8 characters).
+- Password verifier is stored locally as a salted PBKDF2 hash; no plaintext password is stored.
+- Clearing browser/site storage removes the local training-password verifier; the next visit to Train Gestures prompts a new password setup.
+- Clearing storage does not delete a password record from a remote account system because this GitHub Pages project has no backend/user-account database.
+- No app-wide lock or end-user app PIN has been added. The existing protection applies only to gesture training and editing.
+- Existing gesture data/settings/history use a separate storage key and are not removed by this password upgrade.
+- Service-worker cache version bumped to v2 so the updated static shell can replace the old cached files.
+
+Important: This is a static, browser-local app. Passwords are not individual cloud accounts, cannot sync across devices, and cannot be recovered by email. Some browsers may retain PWA website storage after uninstall; clear the website's stored data to trigger first-run password setup again.
+
+See README.md for deployment and privacy details.

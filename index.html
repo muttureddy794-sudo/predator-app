@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111a43">
+<meta name="description" content="SignSpeak AI recognises your trained hand gestures and converts them into text and speech.">
+<meta name="application-name" content="SignSpeak AI">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SignSpeak AI">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./assets/icon-192.png">
+<title>SignSpeak AI — Sign Language Gesture Recognition</title>
+<!--
+RUN LOCALLY (camera needs localhost or HTTPS; internet needed once for MediaPipe CDN files):
+  cd sign-language-app && python -m http.server 8000   ->  open http://localhost:8000
+CAMERAS: Laptop webcam works directly. Phone cameras are NOT automatic: install DroidCam (phone app + PC client/driver)
+  USB mode: enable USB debugging, plug in, start DroidCam on phone, connect in PC client (USB).  Wi-Fi mode: same network, enter phone IP in client.
+  Then click "Refresh cameras" and pick "DroidCam" from the list. Any app exposing a virtual webcam works the same way.
+MODEL: No pretrained vocabulary ships with this app. Gestures are trained by you in the Train page (landmark features + k-nearest-neighbour).
+-->
+<style>
+:root{--bg:#0b1630;--card:#13224a;--ink:#fff;--mut:#b9c3dd;--red:#e63946;--yel:#ffc93c;--line:#2a3b6e}
+@media(prefers-color-scheme:light){:root{--bg:#f4f6fb;--card:#fff;--ink:#0b1630;--mut:#46506b;--line:#d5dbea}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+body::before{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradient(120deg,#0b1630,#3a0d1c,#4a3a05,#0b1630);background-size:300% 300%;animation:bg 20s ease infinite;opacity:.35}
+@keyframes bg{50%{background-position:100% 50%}}
+nav{display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px;background:var(--card);border-bottom:2px solid var(--yel);position:sticky;top:0;z-index:5;align-items:center}
+nav b{color:var(--yel);margin-right:auto}nav a{color:var(--ink);text-decoration:none;padding:7px 12px;border-radius:8px}nav a.on,nav a:hover{background:var(--red);color:#fff}
+main{max-width:1100px;margin:auto;padding:16px}.page{display:none}.page.on{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+h1{font-size:clamp(1.6rem,4vw,2.6rem);margin:.2em 0}h2{margin-top:0}
+button,select,input{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+button{cursor:pointer;background:var(--red);color:#fff;border:0;font-weight:600;transition:transform .15s}button:hover{transform:translateY(-2px)}button.alt{background:var(--yel);color:#111}button.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}button:disabled{opacity:.5;cursor:not-allowed}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+.hero{perspective:900px;display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:center}
+.cube{transform:rotateY(-18deg) rotateX(8deg);background:linear-gradient(135deg,var(--red),var(--yel));border-radius:20px;padding:30px;color:#111;font-size:4rem;text-align:center;box-shadow:20px 20px 40px #0006;animation:fl 5s ease-in-out infinite}
+@keyframes fl{50%{transform:rotateY(-8deg) rotateX(4deg) translateY(-12px)}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.vid{position:relative;width:100%;min-height:200px;background:#000;border-radius:12px;overflow:hidden;aspect-ratio:4/3}
+.vid video,.vid canvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);object-fit:cover}.vid canvas{pointer-events:none}details{margin:8px 0}summary{cursor:pointer;font-weight:600}
+.badge{display:inline-block;padding:4px 10px;border-radius:99px;background:var(--yel);color:#111;font-weight:700}.badge.bad{background:var(--red);color:#fff}
+.chip{display:inline-block;margin:3px;padding:5px 10px;border-radius:99px;background:var(--bg);border:1px solid var(--yel);cursor:pointer}
+.msg{padding:8px 12px;border-radius:8px;background:var(--bg);border-left:4px solid var(--yel);margin:8px 0}.msg.err{border-color:var(--red)}
+.bar{height:10px;background:var(--bg);border-radius:9px;overflow:hidden}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--red),var(--yel));width:0}
+.muted{color:var(--mut);font-size:.9rem}ul.l{list-style:none;padding:0}ul.l li{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+textarea{width:100%;font:inherit;padding:8px;border-radius:8px;background:var(--bg);color:var(--ink);border:1px solid var(--line)}
+
+/* ===== Training lock ===== */
+nav button{padding:6px 12px;font-size:.9rem}
+.tbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;border-color:var(--yel)}.tbar .sp{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.ov{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto;
+ background:radial-gradient(circle at 15% 10%,rgba(230,57,70,.6),transparent 55%),radial-gradient(circle at 88% 92%,rgba(255,201,60,.5),transparent 55%),rgba(6,10,26,.9);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.ov[hidden]{display:none}
+.lk{width:min(420px,100%);margin:auto;border-radius:22px;border:3px solid transparent;background:linear-gradient(var(--card),var(--card)) padding-box,linear-gradient(135deg,var(--red),var(--yel)) border-box;
+ box-shadow:0 24px 70px rgba(0,0,0,.55),0 0 46px rgba(230,57,70,.4);overflow:hidden;animation:pop .35s ease}
+@keyframes pop{from{opacity:0;transform:translateY(14px) scale(.96)}}
+@keyframes shake{20%,60%{transform:translateX(-9px)}40%,80%{transform:translateX(9px)}}.lk.shake{animation:shake .4s}
+.lk-head{padding:22px 18px 16px;text-align:center;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.5);background:linear-gradient(135deg,var(--red),#f0592b 55%,#f7a928)}
+.lk-ico{width:78px;height:78px;margin:0 auto 8px;border-radius:50%;display:grid;place-items:center;font-size:2.5rem;background:rgba(0,0,0,.25);box-shadow:0 0 0 6px rgba(255,255,255,.18)}
+.lk-head h2{margin:0;font-size:1.35rem}.lk-sub{margin:6px 0 0;font-size:.92rem;opacity:.95}
+.lk-body{padding:18px}.lk-note{margin:0 0 12px;padding:8px 12px;border-radius:8px;background:rgba(255,201,60,.16);border-left:4px solid var(--yel);font-size:.9rem}
+.lk-field{display:flex;gap:8px}.lk-field[hidden]{display:none}.lk-field input{flex:1;min-width:0;font-size:1.05rem;letter-spacing:.12em}.lk-field button{padding:8px 12px}
+.lk-err{display:none;margin-top:10px;padding:9px 12px;border-radius:8px;background:rgba(230,57,70,.16);border-left:4px solid var(--red);font-weight:600;font-size:.92rem}.lk-err.show{display:block}
+.lk-act{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.lk-act button{flex:1 1 130px;padding:11px 14px}
+.lk-foot{margin:12px 0 0;text-align:center}
+.lockcard{text-align:center;padding:30px 16px;border:2px solid transparent;background:linear-gradient(var(--card),var(--card)) padding-box,linear-gradient(135deg,var(--red),var(--yel)) border-box}.lockcard .big{font-size:3.2rem}
+@media(max-width:480px){.lk-head{padding:16px 12px 12px}.lk-ico{width:62px;height:62px;font-size:2rem}.lk-body{padding:14px}.ov{padding:10px;align-items:flex-start}.tbar .sp{margin-left:0;width:100%}.tbar .sp button{flex:1}}
+
+/* ===== SignSpeak premium theme ===== */
+:root{--bg:#070b1f;--card:rgba(20,28,72,.72);--ink:#f4f6ff;--mut:#b4bde0;--red:#ff4d6d;--yel:#ffc93c;--line:rgba(140,160,255,.25);--blue:#3b82ff;--vio:#8b5cf6;--cyan:#22e4ff;--mag:#f038c8;--cor:#ff6b57;--teal:#14d9b5;--grad:linear-gradient(120deg,var(--blue),var(--vio),var(--mag),var(--cor),var(--yel))}
+html{scroll-behavior:smooth}body{overflow-x:hidden}.hh,.sec{overflow-x:clip}body{background:radial-gradient(1200px 700px at 10% -10%,#2a1b6b55,transparent),radial-gradient(900px 600px at 100% 20%,#0b6b8a40,transparent),var(--bg)}body::before{opacity:.18}
+#fx{position:fixed;inset:0;width:100%;height:100%;z-index:-1;pointer-events:none}
+.card{background:var(--card);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid var(--line);box-shadow:0 10px 36px rgba(0,0,0,.35);border-radius:18px}
+.page.on{animation:pgIn .5s ease both}@keyframes pgIn{from{opacity:0;transform:translateY(18px) scale(.985)}}
+button{background:linear-gradient(135deg,var(--red),var(--mag));box-shadow:0 4px 16px rgba(240,56,200,.3)}button.alt{background:linear-gradient(135deg,var(--yel),#ff9f43);color:#1b1200}button.ghost{background:rgba(255,255,255,.05);box-shadow:none}
+input,select,textarea{background:rgba(7,11,31,.6)}input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+nav{background:rgba(9,14,40,.8);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border-bottom:0;padding:8px 16px;justify-content:space-between;flex-wrap:nowrap}
+nav::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--grad);background-size:200% 100%;animation:slide 6s linear infinite}@keyframes slide{to{background-position:200% 0}}
+.logo{display:flex;align-items:center;gap:8px;margin:0;font-size:1.1rem;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;white-space:nowrap}.logo .lg{display:inline-block;color:#fff;-webkit-text-fill-color:#fff;animation:wave 2.4s ease-in-out infinite;transform-origin:70% 80%}@keyframes wave{50%{transform:rotate(18deg) scale(1.12)}}
+.links{display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end}nav .links a{position:relative;padding:8px 11px;font-size:.92rem;background:none!important}
+nav .links a::after{content:"";position:absolute;left:12px;right:12px;bottom:2px;height:3px;border-radius:3px;background:var(--grad);transform:scaleX(0);transition:transform .3s}nav .links a:hover::after,nav .links a.on::after{transform:scaleX(1)}nav .links a.on{color:var(--yel);font-weight:700}nav .links a:hover{color:var(--cyan)}
+#navBtn{display:none;padding:8px 12px;font-size:1.2rem}
+@media(max-width:900px){#navBtn{display:block}.links{display:none;position:absolute;top:100%;left:0;right:0;flex-direction:column;align-items:stretch;padding:10px;background:rgba(9,14,40,.97);border-bottom:2px solid var(--vio)}nav.open .links{display:flex}nav .links a{padding:12px}}
+main{max-width:1180px}
+.rv{transition:opacity .7s ease,transform .7s ease}html.js .rv{opacity:0;transform:translateY(26px)}html.js .rv.in{opacity:1;transform:none}
+.hh{min-height:calc(100vh - 80px);display:grid;grid-template-columns:1.05fr .95fr;gap:24px;align-items:center;padding:24px 0}
+.hh h1{font-size:clamp(2.6rem,7vw,5.2rem);letter-spacing:.04em;line-height:1;margin:.1em 0}.hh h1 span{display:inline-block;background:var(--grad);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:slide 5s linear infinite,rise .9s cubic-bezier(.2,.8,.2,1) both}.hh h1 span:nth-child(2){animation-delay:0s,.15s}.hh h1 span:nth-child(3){animation-delay:0s,.3s}
+@keyframes rise{from{opacity:0;transform:translateY(40px) rotateX(70deg)}}
+.hsub{font-size:clamp(1.05rem,2.4vw,1.5rem);font-weight:700;color:var(--cyan);margin:.4em 0}.hdesc{color:var(--mut);max-width:560px;line-height:1.6}
+.cta{display:flex;flex-wrap:wrap;gap:14px;margin-top:22px}.cta button{padding:15px 26px;font-size:1rem;letter-spacing:.06em;border-radius:14px;position:relative}.cta .p{background:linear-gradient(135deg,var(--blue),var(--vio),var(--mag));box-shadow:0 0 28px rgba(139,92,246,.6)}.cta .s{background:linear-gradient(135deg,var(--yel),var(--cor));color:#1b1200;box-shadow:0 0 28px rgba(255,201,60,.45)}.cta button:hover{transform:translateY(-3px) scale(1.04)}
+.stage{position:relative;height:min(520px,72vw);perspective:1000px;display:grid;place-items:center}
+.ring{position:absolute;border-radius:50%;border:3px solid transparent;background:linear-gradient(var(--bg),var(--bg)) padding-box,var(--grad) border-box;opacity:.75;box-shadow:0 0 24px rgba(34,228,255,.35)}
+.r1{width:88%;aspect-ratio:1;transform:rotateX(72deg);animation:spin 14s linear infinite}.r2{width:68%;aspect-ratio:1;transform:rotateY(70deg);animation:spin2 11s linear infinite}.r3{width:90%;aspect-ratio:1;transform:rotateX(60deg) rotateY(25deg);animation:spin 22s linear infinite reverse;opacity:.4}
+@keyframes spin{to{transform:rotateX(72deg) rotateZ(360deg)}}@keyframes spin2{to{transform:rotateY(70deg) rotateZ(-360deg)}}
+.orb{position:absolute;border-radius:50%;filter:blur(2px);animation:flt 7s ease-in-out infinite}.o1{width:90px;height:90px;left:4%;top:8%;background:radial-gradient(circle at 30% 30%,#fff9,var(--mag) 40%,transparent 70%)}.o2{width:70px;height:70px;right:6%;bottom:12%;background:radial-gradient(circle at 30% 30%,#fff9,var(--cyan) 40%,transparent 70%);animation-delay:-3s}.o3{width:50px;height:50px;right:14%;top:6%;background:radial-gradient(circle at 30% 30%,#fff9,var(--yel) 40%,transparent 70%);animation-delay:-5s}
+@keyframes flt{50%{transform:translateY(-22px) translateX(8px)}}
+#hand{position:relative;width:62%;max-height:92%;transform-style:preserve-3d;animation:hv 6s ease-in-out infinite;filter:drop-shadow(0 0 18px rgba(34,228,255,.6))}@keyframes hv{0%,100%{transform:rotateY(-22deg) rotateX(6deg) translateY(0)}50%{transform:rotateY(22deg) rotateX(-4deg) translateY(-14px)}}
+#hand line{stroke:url(#hg);stroke-width:5;stroke-linecap:round;stroke-dasharray:200;animation:dash 3s ease-in-out infinite alternate}@keyframes dash{from{stroke-dashoffset:200}to{stroke-dashoffset:0}}#hand circle{fill:var(--yel);stroke:var(--mag);stroke-width:3;animation:pls 2s ease-in-out infinite}@keyframes pls{50%{r:9}}
+.fc{position:absolute;padding:10px 14px;border-radius:14px;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.28);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);font-weight:700;font-size:.85rem;box-shadow:0 10px 30px rgba(0,0,0,.4);animation:flt 6s ease-in-out infinite}.c1{left:0;bottom:22%}.c2{right:5%;top:30%;animation-delay:-2s}.c3{left:12%;top:2%;animation-delay:-4s}
+.sec{padding:54px 0 10px}.sec>h2{font-size:clamp(1.6rem,4vw,2.4rem);text-align:center;margin:0 0 6px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}.sec>p.lead{text-align:center;color:var(--mut);max-width:680px;margin:0 auto 26px}
+.g{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);border-radius:20px;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:0 12px 34px rgba(0,0,0,.35);padding:18px;position:relative;transition:transform .2s ease,box-shadow .3s;transform:perspective(800px) rotateX(var(--rx,0)) rotateY(var(--ry,0))}.g::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:2px;background:linear-gradient(135deg,var(--c1,var(--blue)),var(--c2,var(--mag)));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}.g:hover{box-shadow:0 16px 44px color-mix(in srgb,var(--c1,var(--blue)) 45%,transparent)}
+.g .ic{width:52px;height:52px;border-radius:15px;display:grid;place-items:center;font-size:1.6rem;margin-bottom:10px;background:linear-gradient(135deg,var(--c1,var(--blue)),var(--c2,var(--mag)));box-shadow:0 6px 18px rgba(0,0,0,.35)}.g h3{margin:.1em 0 .3em}.g p{margin:0;color:var(--mut);font-size:.92rem;line-height:1.5}
+.gr{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}.steps .g .n{position:absolute;top:10px;right:14px;font-size:2rem;font-weight:900;opacity:.25}
+.demo{display:grid;grid-template-columns:1.2fr 1fr;gap:20px;align-items:center}.dv{aspect-ratio:4/3;border-radius:16px;background:linear-gradient(135deg,#000,#101a46);display:grid;place-items:center;text-align:center;padding:16px;border:1px dashed var(--cyan);color:var(--mut)}.dv b{display:block;font-size:2.4rem}
+.tech{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.tech .g{text-align:center;padding:14px}.tech .g span{font-size:1.8rem;display:block}
+footer{margin-top:60px;padding:34px 16px 20px;text-align:center;background:rgba(5,8,26,.85);border-top:2px solid transparent;border-image:var(--grad) 1;color:var(--mut)}footer b{font-size:1.2rem;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}footer nav{all:unset}.fl{display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:center;margin:12px 0}.fl a{color:var(--ink);text-decoration:none}.fl a:hover{color:var(--yel)}
+@media(max-width:820px){.hh{grid-template-columns:1fr;text-align:center}.hdesc{margin:auto}.cta{justify-content:center}.demo{grid-template-columns:1fr}.stage{order:-1;height:340px}}
+/* app screens */
+#cur{font-size:clamp(2.4rem,7vw,4.4rem);background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;text-align:center}.vid{border-radius:16px;box-shadow:0 0 0 2px var(--vio),0 0 30px rgba(139,92,246,.5)}
+.bar{height:14px;background:rgba(255,255,255,.08)}.bar i{background:linear-gradient(90deg,var(--teal),var(--cyan),var(--yel),var(--mag));transition:width .15s}
+.badge{background:linear-gradient(135deg,var(--teal),var(--cyan));color:#021;box-shadow:0 0 14px rgba(20,217,181,.5)}.badge.bad{background:linear-gradient(135deg,var(--red),var(--cor));color:#fff;box-shadow:0 0 14px rgba(255,77,109,.5)}
+#status[data-s=load]{background:linear-gradient(135deg,var(--blue),var(--vio));color:#fff;animation:pls2 1.2s infinite}#status[data-s=hand]{background:linear-gradient(135deg,var(--cyan),var(--blue));color:#021}#status[data-s=ok]{background:linear-gradient(135deg,var(--yel),var(--teal));color:#021;box-shadow:0 0 22px var(--yel)}@keyframes pls2{50%{opacity:.55}}
+html.calm *,html.calm *::before,html.calm *::after{animation:none!important;transition:none!important}html.calm .rv{opacity:1!important;transform:none!important}
+@media(prefers-reduced-motion:reduce){.rv{opacity:1!important;transform:none!important}}
+
+/* ===== Mobile + PWA refinements ===== */
+:root{color-scheme:dark}
+html{min-height:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{min-height:100vh;min-height:100svh;padding-bottom:env(safe-area-inset-bottom)}
+nav{padding-top:max(8px,env(safe-area-inset-top));padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+main{width:min(100%,1180px);padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+.grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));min-width:0}
+.grid>*,.card,.g,.page{min-width:0}
+input,select,textarea,button{max-width:100%;touch-action:manipulation}
+button,a,select{ -webkit-tap-highlight-color:transparent }
+button{min-height:42px}
+input,select{min-height:42px}
+.vid{width:100%;max-height:72svh;min-height:180px;aspect-ratio:4/3;touch-action:pan-y}
+.vid video,.vid canvas{width:100%;height:100%;object-fit:contain}
+.camera-select-row select{min-width:0;flex:1 1 180px}
+#camFacing{max-width:100%}
+textarea{min-width:0;max-width:100%}
+.card pre{max-width:100%;overflow:auto}
+.pwa-install{border:1px solid rgba(34,228,255,.45)!important;color:var(--cyan)!important}
+#pwaInstallBtn[hidden]{display:none!important}
+@media(max-width:900px){nav{position:sticky}.links{max-height:calc(100svh - 72px);overflow-y:auto;overscroll-behavior:contain}.links button{width:100%;text-align:left}}
+@media(max-width:640px){
+ main{padding-top:10px;padding-bottom:24px}
+ .hh{min-height:auto;padding:18px 0 8px;gap:10px}
+ .hh h1{font-size:clamp(2.4rem,13vw,4rem)}
+ .stage{height:min(82vw,340px);min-height:240px}
+ .grid{grid-template-columns:minmax(0,1fr);gap:10px}
+ .card{padding:12px;margin-bottom:10px;border-radius:15px}
+ .row{align-items:stretch}
+ .row>*{min-width:0}
+ .row input:not([type=checkbox]):not([type=range]),.row select{flex:1 1 100%;width:100%}
+ .row button{flex:1 1 auto}
+ .camera-select-row select{flex:1 1 100%}
+ .vid{min-height:200px;max-height:62svh;border-radius:12px}
+ .cta{gap:9px}.cta button{flex:1 1 100%;padding:13px 16px}
+ .sec{padding:36px 0 8px}
+ .lk{width:min(100%,420px)}
+ .ov{align-items:center;padding: max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}
+ footer{margin-top:34px;padding-bottom:max(20px,env(safe-area-inset-bottom))}
+}
+@media(max-width:380px){
+ nav{padding-left:8px;padding-right:8px}
+ .logo{font-size:1rem}
+ #navBtn{padding:7px 9px}
+ .stage{min-height:220px}
+ .fc{font-size:.72rem;padding:7px 9px}
+}
+@media(orientation:landscape) and (max-height:540px){
+ .vid{max-height:68vh;min-height:140px}
+ .hh{min-height:auto}
+ .stage{height:260px}
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.page.on{animation:none}}
+</style></head><body>
+<nav><b class="logo"><span class="lg">🤟</span>SignSpeak AI</b><button id="navBtn" type="button" aria-label="Menu" aria-expanded="false">☰</button><div class="links" id="navLinks"><a href="#home">Home</a><a href="#live">Live Recognition</a><a href="#train" id="navTrain">Train Gestures</a><a href="#library">Gesture Library</a><a href="#history">History</a><a href="#settings">Settings</a><button id="motionBtn" class="ghost" type="button" aria-pressed="false" title="Reduce animations">✨ Motion</button><button id="pwaInstallBtn" class="ghost pwa-install" type="button" hidden>＋ Install App</button><button id="authChip" class="ghost" type="button" onclick="chipClick()" aria-label="Training lock status">🔒 Locked</button></div></nav>
+<canvas id="fx" aria-hidden="true"></canvas>
+<main>
+<section id="home" class="page">
+<div class="hh"><div><div class="hsub" style="font-size:.9rem;letter-spacing:.3em;color:var(--yel)">AI · ACCESSIBILITY · INNOVATION</div>
+<h1 aria-label="SIGN SPEAK AI"><span>SIGN</span> <span>SPEAK</span> <span>AI</span></h1><div class="hsub">Breaking Communication Barriers with Artificial Intelligence</div>
+<p class="hdesc">An interactive AI-powered system that recognizes trained hand gestures and converts them into text and speech to support accessible communication.</p>
+<div class="cta"><button class="p" type="button" onclick="location.hash='live'">▶ START LIVE RECOGNITION</button><button class="s" type="button" onclick="location.hash='train'">✋ TRAIN YOUR GESTURES</button></div></div>
+<div class="stage" id="stage"><div class="ring r3"></div><div class="ring r1"></div><div class="ring r2"></div><span class="orb o1"></span><span class="orb o2"></span><span class="orb o3"></span>
+<svg id="hand" viewBox="0 0 300 340" aria-hidden="true"><defs><linearGradient id="hg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22e4ff"/><stop offset=".5" stop-color="#8b5cf6"/><stop offset="1" stop-color="#f038c8"/></linearGradient></defs></svg>
+<div class="fc c1" data-d="30">📷 21 hand landmarks</div><div class="fc c2" data-d="50">🔊 Text + Speech</div><div class="fc c3" data-d="20">🔒 Private · local</div></div></div>
+<div class="sec rv"><h2>Live Project Demo</h2><p class="lead">The real recognition module runs on your camera. Nothing below is a simulated result.</p>
+<div class="g demo" data-tilt style="--c1:var(--cyan);--c2:var(--blue)"><div class="dv"><div><b>📷</b>Your camera preview appears in the Live module.<br>Hand landmarks and recognised words come only from the real classifier.</div></div>
+<div><h3>Real camera-based recognition</h3><p class="muted">Trained gestures available now: <b id="gcount">0</b>. Laptop, USB and DroidCam webcams supported.</p><div class="cta"><button class="p" type="button" onclick="location.hash='live'">Open Live Recognition</button></div></div></div></div>
+<div class="sec rv"><h2>How It Works</h2><p class="lead">Six steps from camera to speech.</p><div class="gr steps" id="steps"></div></div>
+<div class="sec rv"><h2>Features</h2><p class="lead">Everything runs in your browser.</p><div class="gr" id="feats"></div></div>
+<div class="sec rv"><h2>Accessibility &amp; Social Impact</h2><div class="g" data-tilt style="--c1:var(--teal);--c2:var(--yel);max-width:860px;margin:auto"><p style="font-size:1rem">Many people with hearing or speech difficulties struggle to be understood in everyday situations. SignSpeak AI explores how a camera and lightweight AI can turn <b>isolated gestures that you train</b> into on-screen text and spoken words, and lets communities build vocabularies for their own signs. It is a support tool and an educational prototype. It does <b>not</b> translate full sign-language sentences or grammar, and it rejects unfamiliar poses instead of guessing.</p></div></div>
+<div class="sec rv"><h2>Technology Stack</h2><div class="tech" id="tech"></div></div></section>
+
+<section id="live" class="page"><div class="grid"><div><div class="card" id="slot-live"></div></div>
+<div><div class="card"><h2>Recognition</h2><div>Status: <span id="status" class="badge bad">Camera off</span></div>
+<h1 id="cur" style="margin:.3em 0">—</h1><div class="bar"><i id="confbar"></i></div><div class="muted" id="conftxt">Confidence: –</div>
+<p class="muted">Hold a trained sign steady. Words are added once, and the hand must leave or change before the same word repeats.</p></div>
+<div class="card"><h2>Sentence</h2><div id="sent" style="min-height:44px"></div><div class="muted">Click a word to remove it.</div>
+<div class="row"><button class="ghost" onclick="back()">⌫ Backspace</button><button class="ghost" onclick="clearSent()">Clear</button><button class="alt" onclick="saveHist()">Save to history</button></div>
+<div class="row"><input id="manual" placeholder="Type a word to add / sentence to speak" style="flex:1"><button class="ghost" onclick="addManual()">Add word</button></div>
+<div class="row"><button onclick="speak(sentText())">🔊 Speak</button><button class="ghost" onclick="stopSpeak()">⏹ Stop</button><button class="ghost" onclick="speak(lastSpoken)">↻ Repeat</button><button class="ghost" onclick="speak($('manual').value)">Speak typed text</button>
+<label><input type="checkbox" id="autoSp"> Auto speech</label></div><div id="spmsg" class="muted"></div></div></div></div></section>
+
+<section id="train" class="page">
+<div id="trainLocked" class="card lockcard"><div class="big">🔒</div><h2>Training Module Locked</h2>
+<p class="muted">Capturing samples, updating gestures and training the model require your training password. Live recognition, the camera and speech stay available.</p>
+<button type="button" onclick="openTrainLock()">🔑 Enter password</button></div>
+<div id="trainHost"></div>
+<template id="trainTpl">
+<div class="card tbar"><span class="badge" id="authBadge">🔓 Training unlocked</span><span class="muted" id="authTimer"></span>
+<span class="sp"><button type="button" class="alt" onclick="lockTraining()">🔒 Lock Training</button><button type="button" class="ghost" onclick="logoutTraining()">⎋ Logout</button></span></div>
+<div class="grid"><div><div class="card" id="slot-train"></div></div>
+<div class="card"><h2>Train a gesture</h2>
+<div class="row"><input id="gname" placeholder="Gesture name e.g. Hello" list="sugg" maxlength="60"><datalist id="sugg"></datalist></div>
+<label class="muted"><input type="checkbox" id="upd"> Update existing gesture (add samples)</label>
+<div class="row"><button id="capBtn" onclick="capture()">● Capture 40 samples</button><button class="ghost" onclick="cancelCap()">Cancel</button><button class="alt" onclick="testMode()">Test</button></div>
+<div class="bar"><i id="capbar"></i></div><div class="muted" id="captxt">Show the sign to the camera, then press Capture and hold/move slightly. Aim for 40–120 samples per gesture, varied angles and distances. Also train a <b>Neutral</b> class (relaxed hand) to reduce false positives.</div>
+<div id="trmsg"></div><div class="muted" id="testout"></div></div></div>
+<details class="card"><summary>🔐 Security — change training password</summary>
+<div class="row"><input type="password" id="pwCur" placeholder="Current password" autocomplete="off" maxlength="128"></div>
+<div class="row"><input type="password" id="pwNew" placeholder="New password (min 8 characters)" autocomplete="off" maxlength="128"><input type="password" id="pwNew2" placeholder="Repeat new password" autocomplete="off" maxlength="128"></div>
+<div class="row"><button type="button" onclick="changePw()">Change password</button></div><div id="pwMsg"></div>
+<p class="muted">The training session locks automatically after 5 minutes without activity. Use a password of at least 8 characters.</p></details>
+</template></section>
+
+<section id="library" class="page"><div class="card"><h2>Gesture library</h2>
+<div class="row"><input id="search" placeholder="Search…" oninput="renderLib()"><select id="filt" onchange="renderLib()"><option value="all">All</option><option value="trained">Trained</option><option value="todo">Suggested (untrained)</option></select>
+<button class="ghost" onclick="exportData()">Export</button><button class="ghost" type="button" onclick="startImport()">🔒 Import</button><input type="file" id="impFile" accept=".json" hidden onchange="importData(this.files[0]);this.value=''"></div>
+<div id="libmsg"></div><ul class="l" id="liblist"></ul>
+<p class="muted">"Suggested" entries are a starter vocabulary with <b>no model data</b> until you train them. Configure the vocabulary for your own sign language by training your own words.</p></div></section>
+
+<section id="history" class="page"><div class="card"><h2>History</h2><button class="ghost" onclick="if(confirm('Clear all history?')){S.hist=[];save();renderHist()}">Clear history</button><ul class="l" id="histlist"></ul></div></section>
+
+<section id="settings" class="page"><div class="card"><h2>Settings</h2>
+<div class="row"><label>Confidence threshold: <b id="thv"></b></label><input type="range" id="thr" min="0.3" max="0.95" step="0.05" style="flex:1"></div>
+<div class="row"><label>Words need <b id="stv"></b> consistent frames</label><input type="range" id="stab" min="4" max="20" step="1" style="flex:1"></div>
+<div class="row"><label>Pause between signs (ms)</label><input type="number" id="pause" min="0" max="3000" step="100" style="width:100px"></div>
+<div class="row"><label>Voice</label><select id="voice"></select><label>Speed <b id="rtv"></b></label><input type="range" id="rate" min="0.5" max="2" step="0.1"></div>
+<div class="row"><label><input type="checkbox" id="autoSp2"> Automatic speech (off by default)</label></div>
+<div class="row"><button class="ghost" onclick="exportData()">Export all data</button><button onclick="resetAll()">🔒 Reset everything</button></div>
+<p class="muted">Data is stored only in this browser (localStorage). Language: speech voices follow your browser/OS.</p></div></section>
+</main>
+<footer><b>🤟 SignSpeak AI</b><p>Mission: make everyday communication more accessible with privacy-friendly, locally running AI.</p><div class="fl"><a href="#home">Home</a><a href="#live">Live Recognition</a><a href="#train">Train Gestures</a><a href="#library">Gesture Library</a><a href="#history">History</a><a href="#settings">Settings</a></div><small>AI-Based Sign Language Recognition and Translation System · Engineering Exhibition Project</small></footer>
+
+<div id="lockOv" class="ov" role="dialog" aria-modal="true" aria-labelledby="lkT" hidden>
+<div class="lk" id="lkCard"><div class="lk-head"><div class="lk-ico" aria-hidden="true">🔒</div><h2 id="lkT">Training Module Locked</h2><p class="lk-sub" id="lkSub"></p></div>
+<div class="lk-body"><p class="lk-note" id="lkNote" hidden></p>
+<form id="lkForm" autocomplete="off" novalidate><label for="lkPw" class="muted" id="lkPwLabel">Training password</label>
+<div class="lk-field"><input id="lkPw" type="password" maxlength="128" autocomplete="new-password" autocapitalize="off" spellcheck="false" placeholder="Enter training password"><button type="button" class="ghost" id="lkEye" aria-label="Show password" aria-pressed="false">👁</button></div>
+<label for="lkPwConfirm" class="muted" id="lkConfirmLabel" hidden>Confirm new password</label>
+<div class="lk-field" id="lkConfirmWrap" hidden><input id="lkPwConfirm" type="password" maxlength="128" autocomplete="new-password" autocapitalize="off" spellcheck="false" placeholder="Confirm training password"></div>
+<div class="lk-err" id="lkErr" role="alert" aria-live="assertive"></div>
+<div class="lk-act"><button type="submit" id="lkGo">🔓 Unlock</button><button type="button" class="ghost" id="lkNo">Cancel</button></div></form>
+<p class="muted lk-foot">This password protects training and gesture editing only. It does not lock the app.</p></div></div></div>
+
+<!-- shared camera panel (moved between Live and Train pages) -->
+<div id="camBox" style="display:none">
+<h2>Camera</h2>
+<div class="row camera-select-row"><select id="camSel" aria-label="Camera device" style="flex:1;min-width:150px"><option value="">Click Start Camera to enable access</option></select><select id="camFacing" aria-label="Phone camera preference"><option value="environment">📷 Rear camera preferred</option><option value="user">🤳 Front camera preferred</option><option value="any">Auto camera selection</option></select><button class="ghost" onclick="listCams(true)">⟳ Refresh Cameras</button></div>
+<div class="row"><button onclick="startCam()">Start Camera</button><button class="ghost" onclick="stopCam('Camera stopped.')">Stop Camera</button><button class="alt" onclick="switchCam()">Switch Camera</button><button class="ghost" onclick="startCam()">Retry Camera</button><button id="bDef" class="ghost" style="display:none" onclick="startCam(true)">Use default camera</button></div>
+<div class="vid"><video id="vid" playsinline muted autoplay></video><canvas id="cv"></canvas></div>
+<div id="cammsg" class="msg">Camera access is required. Click Start Camera and allow permission when the browser asks. Needs http://localhost or HTTPS.</div>
+<details open><summary>Camera diagnostics</summary><pre id="diag" class="muted" style="white-space:pre-wrap;margin:6px 0"></pre></details>
+<details><summary>Camera setup guide: laptop · USB phone · DroidCam</summary>
+<p class="muted"><b>Laptop:</b> click Start Camera, allow permission. If it fails, close other apps using the webcam and check OS privacy settings.<br>
+<b>Phone over USB:</b> a plain USB cable does not expose the camera to browsers. Use a feature/app that creates a virtual webcam (e.g. DroidCam USB, or Windows' "Link to Windows"/Camo-type apps).<br>
+<b>DroidCam:</b> install the DroidCam app on the phone and the DroidCam Client (with driver) on the PC. <i>USB:</i> enable USB debugging on the phone, plug in, open the app, choose the USB tab in the PC client, Start. <i>Wi-Fi:</i> same network, enter the IP/port shown in the phone app, Start. Keep the client running, then press <b>Refresh Cameras</b> and pick "DroidCam Source" (name varies).<br>
+<b>Not listed?</b> Restart the browser after installing the driver, check no other app holds the camera, and confirm the client says "connected". The app never selects another camera without telling you.</p></details></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script>
+/* ===== SignSpeak security core: runs BEFORE the app script. Private state lives in closures. ===== */
+class AuthError extends Error{constructor(m){super(m);this.name='AuthError'}}
+/* ---- SHA-256 / PBKDF2 fallback (used only when WebCrypto is unavailable; output identical to WebCrypto) ---- */
+const _K=new Uint32Array(64),_H0=new Uint32Array(8);
+(function(){let n=0,p=2;const pr=x=>{for(let i=2;i*i<=x;i++)if(x%i===0)return false;return true};
+ while(n<64){if(pr(p)){if(n<8)_H0[n]=(Math.pow(p,.5)%1)*4294967296;_K[n]=(Math.cbrt(p)%1)*4294967296;n++}p++}})();
+function _sha256(m){const l=m.length,n=((l+9+63)>>6)<<6,b=new Uint8Array(n);b.set(m);b[l]=0x80;const dv=new DataView(b.buffer);
+ dv.setUint32(n-4,(l*8)>>>0);dv.setUint32(n-8,Math.floor(l*8/4294967296));const h=Uint32Array.from(_H0),w=new Uint32Array(64);
+ for(let o=0;o<n;o+=64){for(let i=0;i<16;i++)w[i]=dv.getUint32(o+i*4);
+  for(let i=16;i<64;i++){const a=w[i-15],c=w[i-2];w[i]=(w[i-16]+(((a>>>7)|(a<<25))^((a>>>18)|(a<<14))^(a>>>3))+w[i-7]+(((c>>>17)|(c<<15))^((c>>>19)|(c<<13))^(c>>>10)))|0}
+  let A=h[0],B=h[1],C=h[2],D=h[3],E=h[4],F=h[5],G=h[6],H=h[7];
+  for(let i=0;i<64;i++){const t1=(H+(((E>>>6)|(E<<26))^((E>>>11)|(E<<21))^((E>>>25)|(E<<7)))+((E&F)^(~E&G))+_K[i]+w[i])|0,
+   t2=((((A>>>2)|(A<<30))^((A>>>13)|(A<<19))^((A>>>22)|(A<<10)))+((A&B)^(A&C)^(B&C)))|0;H=G;G=F;F=E;E=(D+t1)|0;D=C;C=B;B=A;A=(t1+t2)|0}
+  h[0]+=A;h[1]+=B;h[2]+=C;h[3]+=D;h[4]+=E;h[5]+=F;h[6]+=G;h[7]+=H}
+ const out=new Uint8Array(32),od=new DataView(out.buffer);for(let i=0;i<8;i++)od.setUint32(i*4,h[i]);return out}
+function _pbkdf2js(pw,salt,iter){if(pw.length>64)pw=_sha256(pw);const ip=new Uint8Array(96),op=new Uint8Array(96);
+ for(let i=0;i<64;i++){const k=pw[i]||0;ip[i]=k^0x36;op[i]=k^0x5c}
+ const hm=(msgLen,msg)=>{const a=new Uint8Array(64+msgLen);a.set(ip.subarray(0,64));a.set(msg,64);const inner=_sha256(a);op.set(inner,64);return _sha256(op.subarray(0,96))};
+ const s=new Uint8Array(salt.length+4);s.set(salt);s[s.length-1]=1;let u=hm(s.length,s);const t=Uint8Array.from(u);
+ for(let i=1;i<iter;i++){u=hm(32,u);for(let j=0;j<32;j++)t[j]^=u[j]}return t}
+/* ---- Local training-password setup and verification ----
+   This is a browser-local training gate, not user-account authentication.
+   There is deliberately no built-in/default password. */
+const Auth=(()=>{
+ const KEY='sl_auth_v2',LEGACY_KEY='sl_auth_v1',IDLE=5*60*1000,ITER=100000,MAXTRY=5,enc=new TextEncoder();
+ let sess=false,last=0,timer=null,busy=false,rec=null;const cbChange=[],cbTick=[];
+ const hex=u=>Array.from(u,b=>b.toString(16).padStart(2,'0')).join('');
+ const unhex=s=>Uint8Array.from(s.match(/../g)||[],h=>parseInt(h,16));
+ const eq=(a,b)=>{if(typeof a!=='string'||typeof b!=='string'||a.length!==b.length)return false;let d=0;for(let i=0;i<a.length;i++)d|=a.charCodeAt(i)^b.charCodeAt(i);return d===0};
+ const valid=r=>r&&typeof r==='object'&&typeof r.salt==='string'&&/^[0-9a-f]{32}$/.test(r.salt)&&typeof r.hash==='string'&&/^[0-9a-f]{64}$/.test(r.hash)&&Number.isInteger(r.iter)&&r.iter>=1000;
+ function persist(){try{localStorage.setItem(KEY,JSON.stringify(rec));return true}catch(e){return false}}
+ function stored(){try{return JSON.parse(localStorage.getItem(KEY))}catch(e){return null}}
+ async function derive(pw,salt,iter){const pb=enc.encode(pw);
+  try{if(globalThis.crypto&&crypto.subtle){const k=await crypto.subtle.importKey('raw',pb,'PBKDF2',false,['deriveBits']);
+   return new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt,iterations:iter},k,256))}}catch(e){}
+  await new Promise(r=>setTimeout(r,0));return _pbkdf2js(pb,salt,iter)}
+ async function make(pw){const salt=crypto.getRandomValues(new Uint8Array(16));
+  return{v:2,iter:ITER,salt:hex(salt),hash:hex(await derive(pw,salt,ITER)),fails:0,until:0}}
+ rec=stored();
+ const ready=(async()=>{
+  // v2 intentionally starts a fresh training-password setup after this upgrade.
+  // Gesture records/settings live under a separate key and are not touched.
+  try{localStorage.removeItem(LEGACY_KEY)}catch(e){}
+  if(!valid(rec))rec=null;
+ })();
+ const fire=(u,why)=>cbChange.slice().forEach(f=>{try{f(u,why)}catch(e){console.error(e)}});
+ function lock(why){const was=sess;sess=false;clearInterval(timer);timer=null;if(was)fire(false,why||'manual')}
+ function touch(){if(!sess)return;const n=Date.now();if(n-last>IDLE){lock('idle');return}last=n}
+ function require_(){if(!sess)throw new AuthError('Training is locked. Enter the training password to continue.');
+  if(Date.now()-last>IDLE){lock('idle');throw new AuthError('Session expired after 5 minutes of inactivity. Enter the password again.')}}
+ async function setupPassword(pw){await ready;
+  if(valid(rec))return{ok:false,error:'A training password is already configured. Sign in and use Change password.'};
+  if(typeof pw!=='string'||pw.length<8)return{ok:false,error:'Use at least 8 characters for your training password.'};
+  if(pw.length>128)return{ok:false,error:'Password is too long (max 128 characters).'};
+  const next=await make(pw);rec=next;
+  if(!persist()){rec=null;return{ok:false,error:'Could not save the password. Check browser storage and try again.'}}
+  return login(pw); // Continue into the training area immediately after first-time setup.
+ }
+ /* Password check with temporary throttling after repeated failures. */
+ async function check(pw){await ready;if(!valid(rec))return{ok:false,needsSetup:true,error:'No training password is configured. Create one to continue.'};
+  if(typeof pw!=='string'||!pw)return{ok:false,error:'Enter the password.'};
+  if(pw.length>128)return{ok:false,error:'Incorrect password.',left:0};
+  const now=Date.now();if(rec.until>now)return{ok:false,locked:true,wait:Math.ceil((rec.until-now)/1000)};
+  if(busy)return{ok:false,error:'Please wait…'};busy=true;let good=false;
+  try{good=eq(hex(await derive(pw,unhex(rec.salt),rec.iter)),rec.hash)}catch(e){busy=false;return{ok:false,error:'Password check is unavailable in this browser.'}}
+  busy=false;
+  if(good){rec.fails=0;rec.until=0;persist();return{ok:true}}
+  rec.fails=(rec.fails||0)+1;let wait=0;
+  if(rec.fails%MAXTRY===0){wait=Math.min(600,30*Math.pow(2,rec.fails/MAXTRY-1));rec.until=Date.now()+wait*1000}
+  persist();return wait?{ok:false,locked:true,wait,error:'Incorrect password.'}:{ok:false,error:'Incorrect password.',left:MAXTRY-rec.fails%MAXTRY}}
+ async function login(pw){const r=await check(pw);if(!r.ok)return r;
+  sess=true;last=Date.now();clearInterval(timer);
+  timer=setInterval(()=>{if(!sess)return;if(Date.now()-last>IDLE){lock('idle');return}cbTick.slice().forEach(f=>{try{f()}catch(e){}})},1000);
+  fire(true);return{ok:true}}
+ async function changePassword(cur,nw){require_();
+  if(typeof nw!=='string'||nw.length<8)return{ok:false,error:'New password must be at least 8 characters.'};
+  if(nw.length>128)return{ok:false,error:'New password is too long (max 128).'};
+  const r=await check(cur);if(!r.ok)return{ok:false,error:r.locked?'Too many attempts. Try again in '+r.wait+'s.':(r.error==='Incorrect password.'?'Current password is incorrect.':r.error)};
+  require_();const prev=rec,next=await make(nw);rec=next;
+  if(!persist()){rec=prev;return{ok:false,error:'Could not store the new password (browser storage blocked or full).'}}
+  last=Date.now();return{ok:true}}
+ ['pointerdown','keydown','touchstart','wheel','mousemove','scroll'].forEach(ev=>addEventListener(ev,touch,{passive:true,capture:true}));
+ document.addEventListener('visibilitychange',()=>{if(sess&&Date.now()-last>IDLE)lock('idle')});
+ addEventListener('storage',e=>{if(e.key===KEY||e.key===null){const s=stored();rec=valid(s)?s:null;lock('changed')}}); // clearing storage also clears the in-memory credential in other open tabs
+ return Object.freeze({IDLE_MS:IDLE,ready,hasPassword:async()=>{await ready;return valid(rec)},isUnlocked:()=>sess&&Date.now()-last<=IDLE,require:require_,login,setupPassword,lock,logout:()=>lock('logout'),touch,changePassword,
+  remaining:()=>sess?Math.max(0,IDLE-(Date.now()-last)):0,
+  lockoutLeft:()=>Math.max(0,Math.ceil(((rec&&rec.until)||0)/1000-Date.now()/1000)),
+  onChange:f=>{cbChange.push(f)},onTick:f=>{cbTick.push(f)}})})();
+/* ---- Model: the ONLY code that can change gestures. Every mutator re-checks authorisation. ---- */
+const Model=(()=>{
+ const raw=Object.create(null);let inited=false;
+ const deny=()=>new AuthError('Direct changes to the gesture model are blocked. Use the authorised training controls.');
+ const view=new Proxy(raw,{set(){throw deny()},deleteProperty(){throw deny()},defineProperty(){throw deny()},setPrototypeOf(){throw deny()},preventExtensions(){throw deny()}});
+ const frz=a=>Object.freeze(a.filter(Array.isArray).map(s=>Object.freeze(Array.from(s))));
+ const okName=n=>typeof n==='string'&&n.trim().length>0&&n.length<=60;
+ const okSamples=a=>Array.isArray(a)&&a.length>0&&a.every(f=>Array.isArray(f)&&f.length===63&&f.every(x=>typeof x==='number'&&isFinite(x)));
+ return Object.freeze({view,
+  init(o){if(inited)throw new AuthError('Model is already initialised.');inited=true;for(const k of Object.keys(o||{}))if(Array.isArray(o[k]))raw[k]=frz(o[k])}, // one-time load of saved data at start-up
+  snapshot:()=>JSON.parse(JSON.stringify(raw)),
+  add(key,samples){Auth.require();if(!okName(key))throw new Error('invalid gesture name');if(!okSamples(samples))throw new Error('invalid landmark data');raw[key]=frz((raw[key]||[]).concat(samples).slice(-300))},
+  rename(a,b){Auth.require();if(!(a in raw))throw new Error('no such gesture');if(!okName(b))throw new Error('invalid gesture name');
+   if(Object.keys(raw).some(k=>k.toLowerCase()===b.toLowerCase()))throw new Error('gesture already exists');raw[b]=raw[a];delete raw[a]},
+  remove(n){Auth.require();if(!(n in raw))throw new Error('no such gesture');delete raw[n]},
+  merge(o){Auth.require();if(!o||typeof o!=='object')throw new Error('invalid data');
+   for(const k in o)if(!okName(k)||!okSamples(o[k]))throw new Error('invalid data');for(const k of Object.keys(o))raw[k]=frz(o[k])},
+  clear(){Auth.require();for(const k of Object.keys(raw))delete raw[k]},
+  restore(s){Auth.require();for(const k of Object.keys(raw))delete raw[k];for(const k of Object.keys(s))raw[k]=frz(s[k])}})})();
+</script>
+<script>
+const $=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const SUGG=['Hello','Thank You','Yes','No','Please','Help','Stop','Water','Sorry','Neutral'];
+const DEF={hist:[],set:{thr:.6,stab:8,pause:0,rate:1,voice:'',auto:false,cam:'',facing:'environment'}};
+let S,_st=null;try{_st=JSON.parse(localStorage.getItem('sl_v1'))}catch(e){}
+S={hist:Array.isArray(_st&&_st.hist)?_st.hist:[],set:Object.assign({},DEF.set,_st&&_st.set)};
+Model.init(_st&&_st.gest&&typeof _st.gest==='object'?_st.gest:{}); // existing gestures are preserved (same sl_v1 format)
+const GEST=Model.view; // read-only view: any direct write throws
+function payload(){return JSON.stringify({gest:GEST,hist:S.hist,set:S.set})}
+function save(){try{const p=payload();localStorage.setItem('sl_v1',p);return localStorage.getItem('sl_v1')===p}catch(e){return false}}
+// ---------- routing ----------
+let prevHash='#home',curHash='#home';
+function route(){const h=(location.hash||'#home').slice(1);const cur='#'+h;if(cur!==curHash){if(curHash!=='#train')prevHash=curHash;curHash=cur}
+ document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id===h));
+ document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.hash==='#'+h));
+ if(h!=='train'&&lkKind==='train'&&lkIsOpen())closeLk(false);
+ const un=Auth.isUnlocked();
+ if(h==='train'){if(un)buildTrain();else{teardownTrain();if(!lkIsOpen())openTrainLock()}}
+ const cb=$('camBox'),slot=h==='live'?$('slot-live'):(h==='train'&&un?$('slot-train'):null);
+ if(slot){slot.appendChild(cb);cb.style.display='block';if(running)$('vid').play().catch(()=>{})}else cb.style.display='none';
+ if(h==='library')renderLib();if(h==='history')renderHist();paintAuth()}
+addEventListener('hashchange',route);
+// ---------- camera (fully independent of the AI model) ----------
+let stream=null,cams=[],running=false,hands=null,busy=false,starting=false,rafId=0,gen=0,handsState='idle',permState='unknown',lastErr='none',handCount=0,aiErr='',devTimer=null;
+const $v=()=>$('vid'),sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const withTimeout=(p,ms,name)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej({name}),ms))]);
+function cmsg(t,err){const m=$('cammsg');m.textContent=t;m.className='msg'+(err?' err':'');if(err)lastErr=t}
+function setStatus(t,bad){const s=$('status');s.textContent=t;s.className='badge'+(bad?' bad':'')}
+async function listCams(announce){
+ const sel=$('camSel'),prev=sel.value||S.set.cam;
+ if(!navigator.mediaDevices||!navigator.mediaDevices.enumerateDevices){sel.innerHTML='<option value="">Camera API unavailable</option>';cmsg('This browser/page cannot access cameras. Use Chrome/Edge/Firefox on http://localhost or HTTPS (not file://).',1);return}
+ try{cams=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');sel.innerHTML='';
+  if(!cams.length){sel.innerHTML='<option value="">No cameras detected</option>';if(!running)cmsg('No cameras detected. Check the webcam is connected/enabled and not blocked by privacy settings. For a phone, install DroidCam (see setup guide), then press Refresh Cameras.',1);return}
+  if(!cams.some(c=>c.label)&&!running){sel.innerHTML='<option value="">Click Start Camera to enable access</option>';if(announce)cmsg(cams.length+' video device(s) exist, but their names are hidden until you allow camera access. Click Start Camera.');return}
+  cams.forEach((c,i)=>{const o=document.createElement('option');o.value=c.deviceId;o.textContent=c.label||('Unnamed video device '+(i+1));sel.appendChild(o)});
+  if(cams.some(c=>c.deviceId===prev))sel.value=prev;
+  if(announce)cmsg(cams.length+' camera(s) found.')}
+ catch(e){cmsg('Could not list cameras: '+(e.message||e.name),1)}}
+function stopStream(){if(stream){stream.getTracks().forEach(t=>{t.onended=null;t.stop()});stream=null}const v=$v();v.pause();v.srcObject=null}
+function halt(){gen++;running=false;cancelAnimationFrame(rafId);stopStream();busy=false;curFeat=null;win=[];handCount=0;const c=$('cv');c.getContext('2d').clearRect(0,0,c.width,c.height)}
+function stopCam(msg){halt();setStatus('Camera off',1);$('bDef').style.display='none';if(msg)cmsg(msg)}
+const gum=id=>{const video={width:{ideal:1280},height:{ideal:720}};if(id)video.deviceId={exact:id};else if(S.set.facing&&S.set.facing!=='any')video.facingMode={ideal:S.set.facing};return navigator.mediaDevices.getUserMedia({video,audio:false})};
+async function startCam(useDefault){
+ if(starting)return;
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){cmsg('Unsupported browser or insecure page. Use a modern browser on http://localhost or HTTPS.',1);return}
+ starting=true;halt();const my=gen;$('bDef').style.display='none';setStatus('Starting camera…');cmsg('Requesting camera access…');
+ const chosen=useDefault===true?'':$('camSel').value;
+ try{
+  const s=await gum(chosen).catch(e=>{if(chosen&&(e.name==='OverconstrainedError'||e.name==='NotFoundError'))e.offerDefault=true;throw e});
+  if(my!==gen){s.getTracks().forEach(t=>t.stop());return}
+  stream=s;const v=$v();v.srcObject=s;
+  await withTimeout(new Promise(r=>{if(v.readyState>=1)r();else v.onloadedmetadata=()=>r()}),8000,'Timeout');
+  await withTimeout(v.play(),8000,'Timeout');
+  await withTimeout((async()=>{while(!(v.videoWidth>0&&v.currentTime>0&&!v.paused)){if(my!==gen)return;await sleep(100)}})(),6000,'Timeout'); // real frames, not just an attached stream
+  if(my!==gen)return;
+  const tr=s.getVideoTracks()[0],st=tr.getSettings();
+  tr.onended=()=>{if(my===gen){stopCam();cmsg('Camera disconnected or taken by another app. Reconnect it, press Refresh Cameras, then Start Camera.',1);listCams()}};
+  running=true;v.parentNode.style.aspectRatio=v.videoWidth+'/'+v.videoHeight;
+  if(st.deviceId){S.set.cam=st.deviceId;save()}
+  await listCams();if(st.deviceId)$('camSel').value=st.deviceId;
+  setStatus('Camera Ready');cmsg('Camera running: '+(tr.label||'video device')+(useDefault===true?' (default camera, as you requested)':''));
+  startAI()}
+ catch(e){if(my===gen){halt();setStatus('Camera off',1)}
+  const m={NotAllowedError:'Camera permission denied. Click the camera icon in the address bar, allow access, then Retry Camera.',SecurityError:'Camera blocked by browser security. Use http://localhost or HTTPS.',NotFoundError:'No matching camera found. Press Refresh Cameras.',OverconstrainedError:'The selected camera is no longer available. Press Refresh Cameras.',NotReadableError:'Camera is busy or blocked. Close Zoom/Teams/Camera app or other tabs using it, then Retry Camera.',AbortError:'Camera start was interrupted. Retry Camera.',Timeout:'Camera opened but delivered no video. Try another camera, close apps using it, or reconnect DroidCam, then Retry Camera.'};
+  cmsg((m[e.name]||'Camera error: '+(e.message||e.name))+(e.offerDefault?' You can try the default camera instead (nothing is switched automatically).':''),1);
+  if(e.offerDefault)$('bDef').style.display='';
+  await listCams()}
+ finally{starting=false}}
+async function switchCam(){const o=[...$('camSel').options].filter(x=>x.value);if(o.length<2){cmsg(o.length?'Only one camera detected — nothing to switch to.':'No cameras listed yet. Click Start Camera first.',1);return}
+ const i=o.findIndex(x=>x.value===$('camSel').value);$('camSel').value=o[(i+1)%o.length].value;await startCam()}
+$('camSel').addEventListener('change',()=>{S.set.cam=$('camSel').value;save();if(running)startCam()});
+const facingSelect=$('camFacing');facingSelect.value=S.set.facing||'environment';
+facingSelect.addEventListener('change',()=>{S.set.facing=facingSelect.value;$('camSel').value='';S.set.cam='';save();if(running)startCam()});
+if(navigator.mediaDevices&&navigator.mediaDevices.addEventListener)navigator.mediaDevices.addEventListener('devicechange',()=>{clearTimeout(devTimer);devTimer=setTimeout(()=>listCams(),400)});
+// AI model: loaded AFTER the camera works; its failure never stops the preview
+async function startAI(){const my=gen;
+ if(typeof Hands==='undefined'){handsState='failed';aiErr='MediaPipe script did not load (offline, blocked, or file://).';aiFail();return}
+ if(!hands){handsState='loading';setStatus('Camera Ready · loading AI model…');
+  try{const h=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
+   h.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:.6,minTrackingConfidence:.5});h.onResults(onResults);
+   await withTimeout(h.initialize(),30000,'Timeout');hands=h}
+  catch(e){hands=null;handsState='failed';aiErr='Hand model failed to load ('+(e.message||e.name||e)+').';aiFail();return}}
+ if(my!==gen)return;handsState='ready';aiErr='';setStatus('Detecting Hands');loop()}
+function aiFail(){if(running){setStatus('AI Model Not Ready — preview still works',1);cmsg('Camera is working, but the AI model is not ready: '+aiErr+' Serve the page via http://localhost with internet access, then press Retry Camera.',1)}}
+function loop(){cancelAnimationFrame(rafId);const step=async()=>{if(!running||handsState!=='ready')return;const v=$v();
+ if(!busy&&v.readyState>=2){busy=true;try{await hands.send({image:v})}catch(e){lastErr='Hand detection error: '+(e.message||e)}busy=false}rafId=requestAnimationFrame(step)};rafId=requestAnimationFrame(step)}
+// diagnostics
+async function initPerm(){try{const p=await navigator.permissions.query({name:'camera'});permState=p.state;p.onchange=()=>{permState=p.state}}catch(e){permState='not reported by this browser'}}
+function diag(){const v=$v(),tr=stream&&stream.getVideoTracks()[0],o=$('camSel').selectedOptions[0],named=cams.some(c=>c.label);
+ $('diag').textContent=['Permission: '+permState,'Video devices detected: '+cams.length,'Selected camera: '+(o&&o.value?o.textContent:'none'),'DroidCam device: '+(named?(cams.some(c=>/droidcam/i.test(c.label))?'listed':'not listed'):'unknown until permission is granted'),
+ 'Stream: '+(tr?tr.readyState+(tr.muted?' (muted)':''):'none'),'Video size: '+(v.videoWidth||0)+'×'+(v.videoHeight||0),'Playback active: '+(!v.paused&&v.readyState>=2?'yes':'no'),'Hands detected: '+handCount,'AI model: '+handsState+(aiErr?' — '+aiErr:''),'Page: '+location.protocol+'//'+(location.host||'(file)')+'  secure context: '+window.isSecureContext,'Last error: '+lastErr].join('\n')}
+const diagTimer=setInterval(diag,500);
+// ---------- features & classifier (same function for training + inference) ----------
+const CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function feature(lm,label){const f=[];const flip=label==='Left'?-1:1;const w=lm[0];let sc=0;
+ const p=lm.map(q=>[(q.x-w.x)*flip,q.y-w.y,q.z-w.z]);p.forEach(q=>{sc=Math.max(sc,Math.hypot(q[0],q[1]))});if(sc<1e-6)return null;
+ p.forEach(q=>f.push(q[0]/sc,q[1]/sc,q[2]/sc));return f}
+function dist(a,b){let s=0;for(let i=0;i<a.length;i++){const d=a[i]-b[i];s+=d*d}return Math.sqrt(s/21)}
+function classify(f){const names=Object.keys(GEST);if(!names.length)return null;const all=[];
+ names.forEach(n=>GEST[n].forEach(s=>all.push([dist(f,s),n])));all.sort((a,b)=>a[0]-b[0]);const k=Math.min(5,all.length),top=all.slice(0,k);
+ const votes={};top.forEach(t=>votes[t[1]]=(votes[t[1]]||0)+1);const best=Object.entries(votes).sort((a,b)=>b[1]-a[1])[0];
+ const md=top.filter(t=>t[1]===best[0]).reduce((s,t)=>s+t[0],0)/best[1];
+ const conf=(best[1]/k)*Math.max(0,1-md/0.5); // distance >0.5 (per-landmark RMS) => rejected
+ return{name:best[0],conf}}
+// ---------- recognition loop ----------
+let curFeat=null,win=[],lastAcc=null,noHand=0,lastAccTime=0;
+function onResults(r){if(!running)return;const c=$('cv'),v=$('vid');c.width=v.videoWidth;c.height=v.videoHeight;const g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);
+ const L=r.multiHandLandmarks||[];handCount=L.length;if(!L.length){curFeat=null;noHand++;if(noHand>8)lastAcc=null;win=[];setStatus('No Hand Detected',1);$('cur').textContent='—';setConf(0);return}
+ noHand=0;L.forEach((lm,i)=>{g.strokeStyle='#ffc93c';g.lineWidth=3;CONN.forEach(([a,b])=>{g.beginPath();g.moveTo(lm[a].x*c.width,lm[a].y*c.height);g.lineTo(lm[b].x*c.width,lm[b].y*c.height);g.stroke()});
+  g.fillStyle='#e63946';lm.forEach(q=>{g.beginPath();g.arc(q.x*c.width,q.y*c.height,4,0,7);g.fill()})});
+ const lab=r.multiHandedness&&r.multiHandedness[0]?r.multiHandedness[0].label:'Right';curFeat=feature(L[0],lab);if(!curFeat)return;
+ if(testing&&$('testout')){const t=classify(curFeat);$('testout').textContent=t&&t.conf>=S.set.thr?`Test: ${t.name} (${(t.conf*100|0)}%)`:'Test: no match';}
+ if(!Object.keys(GEST).length){setStatus('Model Not Ready — train gestures first',1);$('cur').textContent='—';setConf(0);return}
+ const p=classify(curFeat),ok=p&&p.conf>=S.set.thr;win.push(ok?p.name:null);if(win.length>S.set.stab)win.shift();setConf(p?p.conf:0);
+ const cnt={};win.forEach(x=>x&&(cnt[x]=(cnt[x]||0)+1));const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
+ if(top&&win.length>=S.set.stab&&top[1]>=S.set.stab*.8){$('cur').textContent=top[0];setStatus('Gesture Recognized');accept(top[0])}
+ else{setStatus('Detecting Hands');$('cur').textContent=ok?p.name+'?':'—'}}
+function setConf(c){$('confbar').style.width=(c*100)+'%';$('conftxt').textContent='Confidence: '+(c>0?(c*100|0)+'%':'–')+' (threshold '+(S.set.thr*100|0)+'%)'}
+// ---------- sentence ----------
+let words=[],lastSpoken='';
+function accept(w){if(w===lastAcc)return;lastAcc=w;const now=Date.now();if(now-lastAccTime<S.set.pause)return;lastAccTime=now;
+ if(w.toLowerCase()==='neutral')return; // reject class never becomes text
+ words.push(w);renderSent();if($('autoSp').checked)speak(w)}
+function renderSent(){const s=$('sent');s.innerHTML='';words.forEach((w,i)=>{const c=document.createElement('span');c.className='chip';c.textContent=w+' ✕';c.onclick=()=>{words.splice(i,1);renderSent()};s.appendChild(c)})}
+const sentText=()=>words.join(' ');
+function back(){words.pop();renderSent()}function clearSent(){words=[];renderSent()}
+function addManual(){const v=$('manual').value.trim();if(v){words.push(v);$('manual').value='';renderSent()}}
+function saveHist(){if(!words.length)return;S.hist.unshift({t:sentText(),d:new Date().toLocaleString()});if(S.hist.length>200)S.hist.pop();if(!save())alert('Could not save (storage full or blocked).')}
+function renderHist(){const u=$('histlist');u.innerHTML='';if(!S.hist.length){u.innerHTML='<li class="muted">No saved sentences yet. Build one on the Live page and press "Save to history".</li>';return}
+ S.hist.forEach((h,i)=>{const li=document.createElement('li');li.innerHTML=`<span><b>${esc(h.t)}</b><br><small class="muted">${esc(h.d)}</small></span><span class="row"><button class="ghost">Copy</button><button class="ghost">Speak</button><button class="ghost">Delete</button></span>`;
+  const b=li.querySelectorAll('button');b[0].onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(h.t);b[1].onclick=()=>speak(h.t);b[2].onclick=()=>{S.hist.splice(i,1);save();renderHist()};u.appendChild(li)})}
+// ---------- speech ----------
+const hasTTS='speechSynthesis' in window;
+function loadVoices(){if(!hasTTS){$('spmsg').textContent='Speech not supported in this browser.';return}const vs=speechSynthesis.getVoices(),sel=$('voice');sel.innerHTML='<option value="">Default</option>';
+ vs.forEach(v=>{const o=document.createElement('option');o.value=v.name;o.textContent=v.name+' ('+v.lang+')';sel.appendChild(o)});sel.value=S.set.voice;if(!vs.length)$('spmsg').textContent='No voices found yet; default voice will be used.'}
+if(hasTTS){speechSynthesis.onvoiceschanged=loadVoices}
+function speak(t){t=(t||'').trim();if(!t)return;if(!hasTTS){$('spmsg').textContent='Speech not supported in this browser.';return}
+ speechSynthesis.cancel(); // keeps the queue from growing
+ const u=new SpeechSynthesisUtterance(t);u.rate=S.set.rate;const v=speechSynthesis.getVoices().find(x=>x.name===S.set.voice);if(v){u.voice=v;u.lang=v.lang}
+ u.onstart=()=>$('spmsg').textContent='🔊 Speaking…';u.onend=()=>$('spmsg').textContent='Speech finished.';u.onerror=e=>$('spmsg').textContent='Speech error: '+(e.error||'unknown');
+ lastSpoken=t;speechSynthesis.speak(u)}
+function stopSpeak(){if(hasTTS){speechSynthesis.cancel();$('spmsg').textContent='Speech stopped.'}}
+// ---------- training lock UI ----------
+let lkResolve=null,lkOpts=null,lkKind='',lkBusy=false,lkTimer=null,lockWhy='',pendingName='';
+const lkIsOpen=()=>!$('lockOv').hidden;
+const fmt=ms=>{const s=Math.max(0,Math.ceil(ms/1000));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+function paintAuth(){const u=Auth.isUnlocked(),c=$('authChip');c.textContent=u?'🔓 '+fmt(Auth.remaining()):'🔒 Training';c.className=u?'alt':'ghost';
+ c.title=u?'Training unlocked — click to lock now. Auto-locks after 5 minutes of inactivity.':'Training access is protected; the rest of the app remains available.';
+ $('navTrain').textContent=u?'Train Gestures':'Train Gestures 🔒';
+ const t=$('authTimer');if(t)t.textContent=u?'Auto-locks after '+fmt(Auth.remaining())+' of inactivity':'';
+}
+function lkError(t){const e=$('lkErr');e.textContent=t;e.classList.toggle('show',!!t)}
+function lkShake(){const c=$('lkCard');c.classList.remove('shake');void c.offsetWidth;c.classList.add('shake')}
+function lkCountdown(){clearInterval(lkTimer);const go=()=>{const w=Auth.lockoutLeft();
+  if(w>0){lkError('⛔ Too many incorrect attempts. Try again in '+w+'s.');$('lkGo').disabled=true;$('lkPw').disabled=true}
+  else{clearInterval(lkTimer);lkTimer=null;$('lkGo').disabled=false;$('lkPw').disabled=false;if($('lkErr').textContent.startsWith('⛔')){lkError('You can try again now.');$('lkPw').focus()}}};
+ if(Auth.lockoutLeft()>0){go();lkTimer=setInterval(go,500)}}
+let lkSetup=false;
+async function askUnlock(o){await Auth.ready;lkSetup=!(await Auth.hasPassword());return new Promise(res=>{if(lkResolve){const r=lkResolve;lkResolve=null;r(false)}
+ lkResolve=res;lkOpts=o||{};lkKind=lkOpts.kind||'';
+ const title=lkSetup?'Create Training Password':(lkOpts.title||'Training Password Required');
+ $('lkT').textContent=lkSetup?'Set your training password':title;
+ $('lkSub').textContent=lkSetup?'Create a password of at least 8 characters. It will protect gesture training and editing on this browser.':(lkOpts.sub||'');
+ const n=$('lkNote');n.hidden=!lkOpts.note;n.textContent=lkOpts.note||'';
+ $('lkPwLabel').textContent=lkSetup?'New training password':'Training password';
+ $('lkPw').placeholder=lkSetup?'Create a password':'Enter training password';
+ $('lkConfirmLabel').hidden=!lkSetup;$('lkConfirmWrap').hidden=!lkSetup;$('lkPwConfirm').value='';
+ $('lkGo').textContent=lkSetup?'Create password':'🔓 Unlock';
+ $('lkPw').value='';$('lkPw').type='password';$('lkEye').setAttribute('aria-pressed','false');lkError('');
+ $('lockOv').hidden=false;document.body.style.overflow='hidden';$('lkGo').disabled=false;$('lkPw').disabled=false;
+ document.querySelector('nav').inert=true;document.querySelector('main').inert=true;lkCountdown();setTimeout(()=>$('lkPw').focus(),60)})}
+function closeLk(ok){clearInterval(lkTimer);lkTimer=null;$('lockOv').hidden=true;document.body.style.overflow='';$('lkPw').value='';$('lkPwConfirm').value='';
+ document.querySelector('nav').inert=false;document.querySelector('main').inert=false;
+ const r=lkResolve,o=lkOpts;lkResolve=null;lkOpts=null;lkKind='';lkSetup=false;if(r)r(ok);if(!ok&&o&&o.onCancel)o.onCancel()}
+$('lkForm').addEventListener('submit',async e=>{e.preventDefault();if(lkBusy)return;const pw=$('lkPw').value;if(!pw){lkError('Please enter the password.');lkShake();return}
+ lkBusy=true;$('lkGo').disabled=true;$('lkGo').textContent=lkSetup?'Creating…':'Checking…';let r;
+ try{
+  if(lkSetup){const confirm=$('lkPwConfirm').value;if(pw!==confirm)r={ok:false,error:'The passwords do not match.'};else r=await Auth.setupPassword(pw)}
+  else r=await Auth.login(pw);
+ }catch(x){r={ok:false,error:'Could not verify or save the password.'}}
+ lkBusy=false;$('lkGo').textContent=lkSetup?'Create password':'🔓 Unlock';$('lkGo').disabled=false;
+ if(r.ok){closeLk(true);return}
+ $('lkPw').value='';if(lkSetup)$('lkPwConfirm').value='';lkShake();
+ if(r.needsSetup){lkSetup=true;$('lkT').textContent='Set your training password';$('lkSub').textContent='Your saved password was cleared. Create a new password of at least 8 characters.';$('lkPwLabel').textContent='New training password';$('lkConfirmLabel').hidden=false;$('lkConfirmWrap').hidden=false;$('lkGo').textContent='Create password';}
+ if(r.locked){lkCountdown()}
+ else lkError('❌ '+(r.error==='Incorrect password.'?'Incorrect password. Training controls remain locked.'+(r.left?' '+r.left+' attempt'+(r.left===1?'':'s')+' left before a temporary lockout.':''):r.error||'Incorrect password.'));
+ $('lkPw').focus()});
+$('lkNo').addEventListener('click',()=>{if(!lkBusy)closeLk(false)});
+$('lkEye').addEventListener('click',()=>{const p=$('lkPw'),show=p.type==='password';p.type=show?'text':'password';$('lkEye').setAttribute('aria-pressed',String(show));$('lkEye').setAttribute('aria-label',show?'Hide password':'Show password');p.focus()});
+$('lockOv').addEventListener('keydown',e=>{if(e.key==='Escape'&&!lkBusy){e.preventDefault();closeLk(false)}
+ if(e.key==='Tab'){const f=[...$('lockOv').querySelectorAll('input,button')].filter(x=>!x.disabled);if(!f.length)return;const i=f.indexOf(document.activeElement);
+  if(e.shiftKey&&i<=0){e.preventDefault();f[f.length-1].focus()}else if(!e.shiftKey&&i===f.length-1){e.preventDefault();f[0].focus()}}});
+const WHY={idle:'Locked automatically after 5 minutes of inactivity.',manual:'Training is locked.',logout:'You have been logged out.',changed:'The password was changed or cleared in another tab. Please sign in again.'};
+function openTrainLock(){const note=WHY[lockWhy]||'';lockWhy='';
+ askUnlock({kind:'train',title:'Training Module Locked',sub:'Enter your training password to train gestures.',note,onCancel(){if(location.hash==='#train')location.hash=prevHash}}).then(ok=>{if(ok)route()})}
+function ensureUnlocked(what){if(Auth.isUnlocked()){Auth.touch();return Promise.resolve(true)}
+ return askUnlock({kind:'action',title:'Training Password Required',sub:what+' requires the training password.'})}
+function chipClick(){if(Auth.isUnlocked())Auth.lock('manual');else askUnlock({kind:'action',title:'Training Access',sub:'Unlock to enable training and library editing.'})}
+function lockTraining(){Auth.lock('manual')}
+function logoutTraining(){location.hash='#home';Auth.logout()}
+function buildTrain(){const host=$('trainHost');if(!host.firstElementChild)host.appendChild($('trainTpl').content.cloneNode(true));$('trainLocked').hidden=true;renderSugg();
+ if(pendingName&&$('gname')){$('gname').value=pendingName;pendingName=''}paintAuth()}
+function teardownTrain(){cancelCap();testing=false;const host=$('trainHost'),cb=$('camBox');
+ if(cb&&host.contains(cb)){cb.style.display='none';document.body.appendChild(cb)} // keep the shared camera panel alive
+ host.replaceChildren();$('trainLocked').hidden=false}
+Auth.onChange((u,why)=>{if(!u){lockWhy=why||'';teardownTrain();if(location.hash==='#train')route();if(location.hash==='#library')renderLib()}
+ else if(location.hash==='#library')renderLib();paintAuth()});
+Auth.onTick(paintAuth);
+// ---------- training (every model-changing step is authorised inside Auth/Model, not just by hiding the UI) ----------
+let capTimer=null,testing=false;
+function tmsg(t,err){const m=$('trmsg');if(m)m.innerHTML=`<div class="msg${err?' err':''}">${esc(t)}</div>`}
+function renderSugg(){const d=$('sugg');if(d)d.innerHTML=SUGG.map(s=>`<option value="${s}">`).join('')}
+function authDenied(e){if(!e||e.name!=='AuthError')return false;tmsg('🔒 '+e.message,1);
+ const m=$('libmsg');if(m&&location.hash==='#library')m.innerHTML=`<div class="msg err">🔒 ${esc(e.message)}</div>`;if(location.hash==='#train')route();return true}
+function capture(){try{Auth.require()}catch(e){authDenied(e);return false}
+ if(capTimer)return false;const nm=$('gname');if(!nm)return false;const name=nm.value.trim();if(!name){tmsg('Enter a gesture name.',1);return false}
+ const ex=Object.keys(GEST).find(k=>k.toLowerCase()===name.toLowerCase());
+ if(ex&&!$('upd').checked){tmsg('Gesture already exists. Choose another name or update the existing gesture.',1);return false}
+ if(!running){tmsg('Start the camera first.',1);return false}
+ const key=ex||name,got=[];$('capBtn').disabled=true;tmsg('Capturing… keep your hand visible.');let miss=0;
+ capTimer=setInterval(()=>{try{Auth.require()}catch(e){cancelCap();authDenied(e);return}
+  if(curFeat){got.push(curFeat.slice());miss=0}else if(++miss>50){cancelCap();tmsg('Capture stopped: no hand detected. Try again.',1);return}
+  $('capbar').style.width=(got.length/40*100)+'%';$('captxt').textContent=got.length+' / 40 samples';
+  if(got.length>=40){clearInterval(capTimer);capTimer=null;$('capBtn').disabled=false;try{finish(key,got)}catch(e){if(!authDenied(e))throw e}}},100);return true}
+function cancelCap(){if(capTimer){clearInterval(capTimer);capTimer=null}const b=$('capBtn');if(b)b.disabled=false;const c=$('capbar');if(c)c.style.width=0;const t=$('captxt');if(t)t.textContent='Cancelled.'}
+function finish(key,got){Auth.require(); // throws AuthError when locked / expired
+ const snap=Model.snapshot();try{Model.add(key,got)}catch(e){if(e.name==='AuthError')throw e;tmsg('Training failed: '+e.message+'.',1);return false}
+ if(save()){tmsg(`Saved "${key}": ${GEST[key].length} samples. Available in live recognition now.`);if(GEST[key].length<20)tmsg('Saved, but add more samples for reliability.');return true}
+ Model.restore(snap);tmsg('Training NOT saved: browser storage is full or blocked. Export/delete data and retry.',1);return false}
+function testMode(){try{Auth.require()}catch(e){authDenied(e);return}testing=!testing;$('testout').textContent=testing?'Test mode on: show a gesture.':'';}
+async function changePw(){const g=id=>$(id)?$(id).value:'',say=(t,e)=>{const m=$('pwMsg');if(m)m.innerHTML=`<div class="msg${e?' err':''}">${esc(t)}</div>`};
+ const n=g('pwNew');if(n!==g('pwNew2')){say('New passwords do not match.',1);return}
+ try{const r=await Auth.changePassword(g('pwCur'),n);
+  if(r.ok){['pwCur','pwNew','pwNew2'].forEach(i=>{if($(i))$(i).value=''});say('Password changed. Use the new password next time.');paintAuth()}else say(r.error||'Could not change password.',1)}
+ catch(e){if(!authDenied(e))throw e}}
+// ---------- library (rename / delete are guarded the same way) ----------
+function renameGesture(n,nn){Auth.require();nn=String(nn||'').trim();if(!nn||nn===n)return{ok:false,error:'unchanged'};
+ if(Object.keys(GEST).some(k=>k.toLowerCase()===nn.toLowerCase()))return{ok:false,error:'exists'};
+ const snap=Model.snapshot();Model.rename(n,nn);if(!save()){Model.restore(snap);return{ok:false,error:'storage'}}return{ok:true}}
+function deleteGesture(n){Auth.require();const snap=Model.snapshot();Model.remove(n);if(!save()){Model.restore(snap);return{ok:false,error:'storage'}}return{ok:true}}
+function renderLib(){const q=$('search').value.toLowerCase(),f=$('filt').value,u=$('liblist');u.innerHTML='';
+ const names=[...new Set([...Object.keys(GEST),...SUGG])].filter(n=>n.toLowerCase().includes(q));const lk=Auth.isUnlocked()?'':' 🔒';
+ names.forEach(n=>{const c=GEST[n]?GEST[n].length:0;if(f==='trained'&&!c||f==='todo'&&c)return;const li=document.createElement('li');
+  li.innerHTML=`<span><b>${esc(n)}</b> <span class="badge ${c?'':'bad'}">${c?'trained · '+c+' samples':'untrained'}</span></span>`;const r=document.createElement('span');r.className='row';
+  if(c){const a=document.createElement('button');a.className='ghost';a.textContent='Rename'+lk;
+   a.onclick=async()=>{if(!await ensureUnlocked('Renaming a gesture'))return;const nn=(prompt('New name',n)||'').trim();if(!nn||nn===n)return;
+    try{const x=renameGesture(n,nn);if(x.error==='exists')$('libmsg').innerHTML='<div class="msg err">Gesture already exists. Choose another name.</div>';else if(x.error==='storage')$('libmsg').innerHTML='<div class="msg err">Could not save (storage full or blocked).</div>'}
+    catch(e){if(!authDenied(e))throw e}renderLib()};
+   const d=document.createElement('button');d.textContent='Delete'+lk;
+   d.onclick=async()=>{if(!await ensureUnlocked('Deleting a gesture'))return;if(!confirm('Delete "'+n+'"?'))return;try{deleteGesture(n)}catch(e){if(!authDenied(e))throw e}renderLib()};r.append(a,d)}
+  else{const t=document.createElement('button');t.className='alt';t.textContent='Train'+lk;t.onclick=()=>{pendingName=n;location.hash='train'};r.append(t)}li.appendChild(r);u.appendChild(li)})}
+function exportData(){const b=new Blob([payload()],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='sign-data.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function startImport(){ensureUnlocked('Importing gestures').then(ok=>{if(ok)$('impFile').click()})}
+function importData(file){if(!file)return;try{Auth.require()}catch(e){authDenied(e);return}
+ const r=new FileReader();r.onload=()=>{try{Auth.require();const d=JSON.parse(r.result);if(!d||typeof d.gest!=='object')throw 0;
+  for(const k in d.gest)if(!Array.isArray(d.gest[k])||d.gest[k].some(s=>!Array.isArray(s)||s.length!==63))throw 0;
+  const snap=Model.snapshot(),bakH=S.hist.slice();Model.merge(d.gest);if(Array.isArray(d.hist))S.hist=d.hist.concat(S.hist).slice(0,200);
+  if(save()){$('libmsg').innerHTML='<div class="msg">Import complete.</div>';renderLib()}else{Model.restore(snap);S.hist=bakH;$('libmsg').innerHTML='<div class="msg err">Storage full; import cancelled.</div>'}}
+ catch(e){if(authDenied(e))return;$('libmsg').innerHTML='<div class="msg err">Invalid file: not valid gesture data (63-value landmark samples expected).</div>'}};r.readAsText(file)}
+async function resetAll(){if(!await ensureUnlocked('Resetting all data'))return;if(!confirm('Delete ALL gestures, history and settings?'))return;
+ try{Auth.require()}catch(e){authDenied(e);return}localStorage.removeItem('sl_v1');location.reload()} // the training password is stored separately and is kept
+// ---------- settings wiring ----------
+function bindSet(){const t=$('thr'),s=$('stab'),p=$('pause'),rt=$('rate');t.value=S.set.thr;s.value=S.set.stab;p.value=S.set.pause;rt.value=S.set.rate;$('autoSp').checked=$('autoSp2').checked=S.set.auto;
+ const upd=()=>{$('thv').textContent=(S.set.thr*100|0)+'%';$('stv').textContent=S.set.stab;$('rtv').textContent=S.set.rate+'×'};upd();
+ t.oninput=()=>{S.set.thr=+t.value;upd();save()};s.oninput=()=>{S.set.stab=+s.value;upd();save()};p.oninput=()=>{S.set.pause=+p.value||0;save()};rt.oninput=()=>{S.set.rate=+rt.value;upd();save()};
+ $('voice').onchange=e=>{S.set.voice=e.target.value;save()};
+ [$('autoSp'),$('autoSp2')].forEach(c=>c.onchange=()=>{S.set.auto=c.checked;$('autoSp').checked=$('autoSp2').checked=c.checked;save()})}
+bindSet();loadVoices();route();listCams();initPerm();
+addEventListener('beforeunload',()=>{clearInterval(diagTimer);halt();if(hasTTS)speechSynthesis.cancel()});
+</script>
+<script>
+/* ===== decorative layer: isolated, can fail without touching camera / AI / training ===== */
+(function(){try{
+const H=document.documentElement;H.classList.add('js');const $$=(q,r)=>[...(r||document).querySelectorAll(q)];
+const mq=matchMedia('(prefers-reduced-motion:reduce)');let calm=mq.matches;try{const v=localStorage.getItem('sl_motion');if(v!==null)calm=v==='calm'}catch(e){}
+const setCalm=c=>{calm=c;H.classList.toggle('calm',c);const b=document.getElementById('motionBtn');b.setAttribute('aria-pressed',c);b.textContent=c?'✨ Motion off':'✨ Motion';try{localStorage.setItem('sl_motion',c?'calm':'full')}catch(e){}};
+document.getElementById('motionBtn').onclick=()=>setCalm(!calm);setCalm(calm);
+const nav=document.querySelector('nav'),nb=document.getElementById('navBtn');nb.onclick=()=>{const o=nav.classList.toggle('open');nb.setAttribute('aria-expanded',o)};
+addEventListener('hashchange',()=>{nav.classList.remove('open');scrollTo({top:0,behavior:calm?'auto':'smooth'})});$$('#navLinks a').forEach(a=>a.addEventListener('click',()=>nav.classList.remove('open')));
+// content cards
+const A=(id,arr,f)=>{document.getElementById(id).innerHTML=arr.map(f).join('')};
+A('steps',[['📷','Capture','Camera captures a hand gesture.','--c1:#3b82ff;--c2:#22e4ff'],['🖐️','Detect','MediaPipe detects hand landmarks.','--c1:#22e4ff;--c2:#14d9b5'],['📐','Normalise','Landmark features are normalised.','--c1:#14d9b5;--c2:#8b5cf6'],['🧠','Classify','The trained gesture classifier compares samples.','--c1:#8b5cf6;--c2:#f038c8'],['💬','Text','A recognised gesture appears as text.','--c1:#f038c8;--c2:#ff6b57'],['🔊','Speech','Optional text-to-speech plays the recognised word.','--c1:#ff6b57;--c2:#ffc93c']],(x,i)=>`<div class="g rv" data-tilt style="${x[3]}"><span class="n">${i+1}</span><div class="ic">${x[0]}</div><h3>${x[1]}</h3><p>${x[2]}</p></div>`);
+A('feats',[['🖐️','Real-time hand detection','Tracks 21 landmarks per hand live.','--c1:#3b82ff;--c2:#22e4ff'],['📹','Multiple webcam support','Laptop, USB and DroidCam sources.','--c1:#22e4ff;--c2:#14d9b5'],['🎓','Custom gesture training','Teach it your own signs.','--c1:#8b5cf6;--c2:#f038c8'],['🔊','Text-to-speech output','Speak words and sentences aloud.','--c1:#f038c8;--c2:#ff6b57'],['📚','Gesture library','Search, rename and manage gestures.','--c1:#ff6b57;--c2:#ffc93c'],['📝','Sentences &amp; history','Build, edit and save sentences.','--c1:#ffc93c;--c2:#14d9b5'],['🔒','Privacy-focused','Video never leaves your browser.','--c1:#14d9b5;--c2:#3b82ff']],x=>`<div class="g rv" data-tilt style="${x[3]}"><div class="ic">${x[0]}</div><h3>${x[1]}</h3><p>${x[2]}</p></div>`);
+A('tech',[['🌐','HTML','#ff6b57'],['🎨','CSS','#3b82ff'],['⚙️','JavaScript','#ffc93c'],['🖐️','MediaPipe Hands','#14d9b5'],['🧠','Landmark classifier','#8b5cf6'],['💾','Browser storage','#22e4ff'],['🗣️','Web Speech API','#f038c8']],x=>`<div class="g rv" data-tilt style="--c1:${x[2]};--c2:#8b5cf6"><span>${x[1]}</span><b>${x[0]}</b></div>`);
+// animated landmark hand (reuses the app's CONN list)
+const P=[[150,310],[100,270],[65,230],[45,195],[30,165],[110,190],[100,140],[95,105],[90,75],[150,180],[150,125],[150,90],[150,55],[190,190],[198,140],[203,108],[208,80],[225,215],[240,175],[250,150],[258,125]];
+const C=typeof CONN!=='undefined'?CONN:[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+document.getElementById('hand').insertAdjacentHTML('beforeend',C.map((c,i)=>`<line x1="${P[c[0]][0]}" y1="${P[c[0]][1]}" x2="${P[c[1]][0]}" y2="${P[c[1]][1]}" style="animation-delay:${i*.08}s"/>`).join('')+P.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="6" style="animation-delay:${i*.1}s"/>`).join(''));
+// reveal + live gesture count
+const rv=$$('.rv');if('IntersectionObserver' in window){const io=new IntersectionObserver(e=>e.forEach(x=>{if(x.isIntersecting){x.target.classList.add('in');io.unobserve(x.target)}}),{threshold:.12});rv.forEach(r=>io.observe(r))}else rv.forEach(r=>r.classList.add('in'));
+const gc=()=>{try{document.getElementById('gcount').textContent=Object.keys(GEST).length}catch(e){}};gc();addEventListener('hashchange',gc);
+// tilt + hero parallax (pointer only, cheap)
+if(matchMedia('(hover:hover)').matches){document.addEventListener('pointermove',e=>{if(calm)return;const t=e.target.closest&&e.target.closest('[data-tilt]');
+ if(t){const r=t.getBoundingClientRect();t.style.setProperty('--ry',((e.clientX-r.left)/r.width-.5)*12+'deg');t.style.setProperty('--rx',(-((e.clientY-r.top)/r.height-.5))*12+'deg')}
+ const st=document.getElementById('stage');if(st&&location.hash.length<=1||location.hash==='#home'){const x=e.clientX/innerWidth-.5,y=e.clientY/innerHeight-.5;st.style.transform=`rotateY(${x*10}deg) rotateX(${-y*8}deg)`;st.querySelectorAll('.fc').forEach(f=>{const d=+f.dataset.d;f.style.translate=`${x*d}px ${y*d}px`})}},{passive:true});
+ document.addEventListener('pointerout',e=>{const t=e.target.closest&&e.target.closest('[data-tilt]');if(t){t.style.removeProperty('--rx');t.style.removeProperty('--ry')}})}
+// status colours from the real status badge
+const sb=document.getElementById('status');new MutationObserver(()=>{const t=sb.textContent;sb.dataset.s=/recognized/i.test(t)?'ok':/Detecting|Ready/i.test(t)&&!/Not/.test(t)?'hand':/Starting|loading/i.test(t)?'load':''}).observe(sb,{childList:true,characterData:true,subtree:true});
+// particles: only on Home, only when visible and motion allowed
+const cv=document.getElementById('fx'),g=cv.getContext('2d'),pc=['#22e4ff','#f038c8','#ffc93c','#8b5cf6','#14d9b5','#ff6b57'];let ps=[],raf=0;
+const size=()=>{cv.width=innerWidth;cv.height=innerHeight;ps=Array.from({length:innerWidth<700?24:48},()=>({x:Math.random()*cv.width,y:Math.random()*cv.height,r:Math.random()*2.4+.8,vx:(Math.random()-.5)*.35,vy:-Math.random()*.5-.1,c:pc[Math.random()*6|0]}))};size();addEventListener('resize',size);
+const onHome=()=>!location.hash||location.hash==='#home';
+const tick=()=>{raf=0;if(calm||document.hidden||!onHome()){g.clearRect(0,0,cv.width,cv.height);return}g.clearRect(0,0,cv.width,cv.height);
+ ps.forEach(p=>{p.x+=p.vx;p.y+=p.vy;if(p.y<-5){p.y=cv.height+5;p.x=Math.random()*cv.width}g.fillStyle=p.c;g.globalAlpha=.18;g.beginPath();g.arc(p.x,p.y,p.r*3,0,7);g.fill();g.globalAlpha=.8;g.beginPath();g.arc(p.x,p.y,p.r,0,7);g.fill()});raf=requestAnimationFrame(tick)};
+const kick=()=>{if(!raf)raf=requestAnimationFrame(tick)};['hashchange','visibilitychange'].forEach(ev=>addEventListener(ev,kick));document.getElementById('motionBtn').addEventListener('click',kick);kick();
+}catch(err){console.warn('Decorative layer disabled:',err);document.documentElement.classList.remove('js')}})();
+</script>
+
+<script>
+/* ===== Progressive Web App support ===== */
+(()=>{
+  const installButton=document.getElementById('pwaInstallBtn');
+  let installPrompt=null;
+  const standalone=()=>window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+  if(installButton&&!standalone())installButton.hidden=false;
+  if(standalone()&&installButton)installButton.hidden=true;
+  window.addEventListener('beforeinstallprompt',event=>{
+    event.preventDefault();installPrompt=event;
+    if(installButton){installButton.hidden=false;installButton.textContent='＋ Install SignSpeak';}
+  });
+  if(installButton)installButton.addEventListener('click',async()=>{
+    if(standalone()){installButton.hidden=true;return;}
+    if(installPrompt){
+      installPrompt.prompt();
+      try{const choice=await installPrompt.userChoice;if(choice&&choice.outcome==='accepted')installButton.hidden=true;}catch(error){console.info('Install prompt result unavailable.',error);}
+      installPrompt=null;return;
+    }
+    const isApple=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;
+    const isAndroid=/android/i.test(navigator.userAgent);
+    const message=isApple
+      ?'To install SignSpeak AI on iPhone/iPad:\n1. Open this website in Safari.\n2. Tap the Share button.\n3. Choose “Add to Home Screen”.'
+      :isAndroid
+        ?'To install SignSpeak AI:\n1. Open this website in Chrome.\n2. Open the browser menu (⋮).\n3. Choose “Install app” or “Add to Home screen”.'
+        :'Open your browser menu and choose “Install app” or “Create shortcut”, when available.';
+    window.alert(message);
+  });
+  window.addEventListener('appinstalled',()=>{if(installButton)installButton.hidden=true;installPrompt=null;});
+  if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost')){
+    window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js',{scope:'./'})
+      .then(registration=>console.info('SignSpeak service worker ready:',registration.scope))
+      .catch(error=>console.warn('Offline support could not be enabled:',error)));
+  }
+})();
+</script>
+</body></html>
